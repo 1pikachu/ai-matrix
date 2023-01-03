@@ -16,6 +16,8 @@ parser.add_argument("--batch_size", type=int, default=128, help="batch size")
 parser.add_argument("--data_type", type=str, default='FP32', help="data type: FP32 or FP16")
 parser.add_argument("--num_accelerators", type=int, default=1, help="number of accelerators used for training")
 parser.add_argument("--embedding_device", type=str, default='gpu', help="synthetic input embedding layer reside on gpu or cpu")
+parser.add_argument("--num_iter", type=int, default=200)
+parser.add_argument("--num_warmup", type=int, default=20)
 args = parser.parse_args()
 
 EMBEDDING_DIM = 18
@@ -23,8 +25,12 @@ HIDDEN_SIZE = 18 * 2
 ATTENTION_SIZE = 18 * 2
 best_auc = 0.0
 
-TOTAL_TRAIN_SIZE = 512000
+#TOTAL_TRAIN_SIZE = 512000
 #TOTAL_TRAIN_SIZE = 16000
+TOTAL_TRAIN_SIZE = args.num_iter * args.batch_size
+NUM_WARMUP = args.num_warmup
+
+tf.config.experimental.enable_tensor_float_32_execution(False)
 
 
 def prepare_data(input, target, maxlen = None, return_neg = False):
@@ -132,6 +138,7 @@ def eval(sess, test_data, model, model_path):
         if args.mode == 'train':
             model.save(sess, model_path)
     return test_auc, loss_sum, accuracy_sum, aux_loss_sum, eval_time, nums
+
 def train_synthetic(   
         batch_size = 128,
         maxlen = 100,
@@ -212,11 +219,11 @@ def train(
         cat_voc = "cat_voc.pkl",
         batch_size = 128,
         maxlen = 100,
-        test_iter = 100,
+        test_iter = 200,
         save_iter = 100,
         model_type = 'DNN',
         data_type = 'FP32',
-	    seed = 2,
+	seed = 2,
 ):
     print("batch_size: ", batch_size)
     print("model: ", model_type)
@@ -277,13 +284,14 @@ def train(
                 start_time = time.time()
                 loss, acc, aux_loss = model.train(sess, [uids, mids, cats, mid_his, cat_his, mid_mask, target, sl, lr, noclk_mids, noclk_cats])
                 end_time = time.time()
-                # print("training time of one batch: %.3f" % (end_time - start_time))
-                approximate_accelerator_time += end_time - start_time
+                print("training time of one batch: %.3f" % (end_time - start_time))
+                if iter >= NUM_WARMUP:
+                    approximate_accelerator_time += end_time - start_time
+                    train_size += batch_size
                 loss_sum += loss
                 accuracy_sum += acc
                 aux_loss_sum += aux_loss
                 iter += 1
-                train_size += batch_size
                 sys.stdout.flush()
                 if (iter % test_iter) == 0:
                     # print("train_size: %d" % train_size)
@@ -294,9 +302,9 @@ def train(
                     loss_sum = 0.0
                     accuracy_sum = 0.0
                     aux_loss_sum = 0.0
-                if (iter % save_iter) == 0:
-                    print('save model iter: %d' %(iter))
-                    model.save(sess, model_path+"--"+str(iter))
+                #if (iter % save_iter) == 0:
+                #    print('save model iter: %d' %(iter))
+                #    model.save(sess, model_path+"--"+str(iter))
                 if train_size >= TOTAL_TRAIN_SIZE:
                     break
             lr *= 0.5
@@ -306,6 +314,7 @@ def train(
         print("Total recommendations: %d" % TOTAL_TRAIN_SIZE)
         print("Approximate accelerator time in seconds is %.3f" % approximate_accelerator_time)
         print("Approximate accelerator performance in recommendations/second is %.3f" % (float(TOTAL_TRAIN_SIZE)/float(approximate_accelerator_time)))
+        print("training Throughput:", float(TOTAL_TRAIN_SIZE)/float(approximate_accelerator_time))
 
 def test(
         train_file = "local_train_splitByUser",
