@@ -284,7 +284,7 @@ def train(
                 start_time = time.time()
                 loss, acc, aux_loss = model.train(sess, [uids, mids, cats, mid_his, cat_his, mid_mask, target, sl, lr, noclk_mids, noclk_cats])
                 end_time = time.time()
-                print("training time of one batch: %.3f" % (end_time - start_time))
+                print("Iteration: {}, training time: {} sec.".format(iter, end_time - start_time), flush=True)
                 if iter >= NUM_WARMUP:
                     approximate_accelerator_time += end_time - start_time
                     train_size += batch_size
